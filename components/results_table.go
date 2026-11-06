@@ -1669,7 +1669,7 @@ func (table *ResultsTable) GetIsLoading() bool {
 }
 
 func (table *ResultsTable) GetIsFiltering() bool {
-	return table.state.isFiltering
+	return table.state.isFiltering || (table.Filter != nil && table.Filter.Input.HasFocus())
 }
 
 func (table *ResultsTable) GetShowSidebar() bool {
