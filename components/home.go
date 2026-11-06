@@ -629,6 +629,12 @@ func (home *Home) homeInputCapture(event *tcell.EventKey) *tcell.EventKey {
 			showQuitConfirmation()
 			return nil
 		}
+	case commands.DiscardChanges:
+		if table != nil && (table.GetIsEditing() || table.GetIsFiltering()) {
+			return event
+		}
+		home.showDiscardChangesConfirmation()
+		return nil
 	case commands.Save:
 		if home.ReadOnly {
 			errorModal := tview.NewModal().

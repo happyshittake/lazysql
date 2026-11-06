@@ -58,6 +58,7 @@ const (
 	Edit
 	CommitEdit
 	DiscardEdit
+	DiscardChanges
 	Save
 	Delete
 	Search
@@ -254,6 +255,8 @@ func (c Command) String() string {
 		return "CommitEdit"
 	case DiscardEdit:
 		return "DiscardEdit"
+	case DiscardChanges:
+		return "DiscardChanges"
 	case ShowRowJSONViewer:
 		return "ShowRowJSONViewer"
 	case ShowCellJSONViewer:

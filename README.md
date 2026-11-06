@@ -772,6 +772,7 @@ Available groups: `Home`, `Connection`, `Tree`, `TreeFilter`, `Table`, `Editor`,
 | H | MoveLeft | Focus tree |
 | Ctrl-E | SwitchToEditorView | Open SQL editor |
 | Ctrl-S | Save | Execute pending changes |
+| F8 | DiscardChanges | Discard all pending edits, additions, and deletions (with confirmation) |
 | q | Quit | Quit |
 | Backspace | SwitchToConnectionsView | Switch to connections list |
 | ? | HelpPopup | Help |
