@@ -15,6 +15,7 @@ import (
 type SidebarState struct {
 	dbProvider        string
 	currentFieldIndex int
+	firstVisibleField int
 }
 
 type SidebarFieldParameters struct {
@@ -53,10 +54,6 @@ func NewSidebar(dbProvider string, readOnly bool) *Sidebar {
 
 	newSidebar.SetInputCapture(newSidebar.inputCapture)
 
-	newSidebar.SetBlurFunc(func() {
-		newSidebar.SetCurrentFieldIndex(0)
-	})
-
 	return newSidebar
 }
 
@@ -88,27 +85,9 @@ func (sidebar *Sidebar) AddField(title, text string, fieldWidth int, pendingEdit
 		field.SetWrap(false)
 	}
 
+	index := sidebar.Flex.GetItemCount()
 	field.SetFocusFunc(func() {
-		_, y, _, h := field.GetRect()
-		_, _, _, mph := sidebar.GetRect()
-
-		if y >= mph {
-			hidingFieldIndex := 0
-			fieldCount := sidebar.Flex.GetItemCount()
-
-			for i := 0; i < fieldCount; i++ {
-				f := sidebar.Flex.GetItem(i)
-				_, _, _, h := f.GetRect()
-				if h != 0 {
-					hidingFieldIndex = i
-					break
-				}
-			}
-
-			sidebar.Flex.ResizeItem(sidebar.Flex.GetItem(hidingFieldIndex), 0, 0)
-		} else if h == 0 {
-			sidebar.Flex.ResizeItem(field, itemFixedSize, 0)
-		}
+		sidebar.SetCurrentFieldIndex(index)
 	})
 
 	fieldParameters := &SidebarFieldParameters{
@@ -120,82 +99,109 @@ func (sidebar *Sidebar) AddField(title, text string, fieldWidth int, pendingEdit
 	sidebar.Flex.AddItem(field, itemFixedSize, 0, true)
 }
 
+func (sidebar *Sidebar) Draw(screen tcell.Screen) {
+	_, _, width, height := sidebar.GetInnerRect()
+	if width <= 0 || height < 2 {
+		// Frame skips its child at these sizes, so discard stale click targets.
+		for i := 0; i < sidebar.Flex.GetItemCount(); i++ {
+			sidebar.Flex.GetItem(i).SetRect(0, 0, 0, 0)
+		}
+		sidebar.Frame.Draw(screen)
+		return
+	}
+	selected := sidebar.GetCurrentFieldIndex()
+	first := min(sidebar.state.firstVisibleField, selected)
+	used := 0
+	for i := first; i <= selected && i < len(sidebar.FieldParameters); i++ {
+		used += sidebar.FieldParameters[i].Height
+	}
+	for first < selected && used > height {
+		used -= sidebar.FieldParameters[first].Height
+		first++
+	}
+	sidebar.state.firstVisibleField = first
+	remaining := height
+	for i, parameters := range sidebar.FieldParameters {
+		size := 0
+		if i >= first {
+			size = min(parameters.Height, remaining)
+			remaining -= size
+		}
+		sidebar.Flex.ResizeItem(sidebar.Flex.GetItem(i), size, 0)
+	}
+	sidebar.Frame.Draw(screen)
+}
+
+func (sidebar *Sidebar) Focus(delegate func(tview.Primitive)) {
+	if sidebar.Flex.GetItemCount() > 0 {
+		delegate(sidebar.Flex.GetItem(sidebar.GetCurrentFieldIndex()))
+	}
+}
+
+func (sidebar *Sidebar) MouseHandler() func(tview.MouseAction, *tcell.EventMouse, func(tview.Primitive)) (bool, tview.Primitive) {
+	return sidebar.WrapMouseHandler(func(action tview.MouseAction, event *tcell.EventMouse, setFocus func(tview.Primitive)) (bool, tview.Primitive) {
+		if !sidebar.InRect(event.Position()) || sidebar.Flex.GetItemCount() == 0 {
+			return false, nil
+		}
+		current := sidebar.Flex.GetItem(sidebar.GetCurrentFieldIndex()).(*tview.TextArea)
+		if !current.GetDisabled() {
+			// Keep an in-progress edit on its field until it is committed or discarded.
+			_, capture := current.MouseHandler()(action, event, setFocus)
+			return true, capture
+		}
+		switch action {
+		case tview.MouseScrollUp, tview.MouseScrollDown:
+			index := sidebar.GetCurrentFieldIndex() - 1
+			if action == tview.MouseScrollDown {
+				index = sidebar.GetCurrentFieldIndex() + 1
+			}
+			index = max(0, min(index, sidebar.Flex.GetItemCount()-1))
+			setFocus(sidebar.Flex.GetItem(index))
+			return true, nil
+		case tview.MouseLeftDown:
+			// Select on release, before any focus-driven layout shift can retarget the click.
+			return true, nil
+		case tview.MouseLeftClick:
+			for i := 0; i < sidebar.Flex.GetItemCount(); i++ {
+				field := sidebar.Flex.GetItem(i).(*tview.TextArea)
+				if field.InRect(event.Position()) {
+					setFocus(field)
+					return true, nil
+				}
+			}
+		}
+		return false, nil
+	})
+}
+
 func (sidebar *Sidebar) FocusNextField() {
-	newIndex := sidebar.GetCurrentFieldIndex() + 1
-
-	if newIndex >= sidebar.Flex.GetItemCount() {
-		return
-	}
-
-	item := sidebar.Flex.GetItem(newIndex)
-
-	if item == nil {
-		return
-	}
-
-	sidebar.SetCurrentFieldIndex(newIndex)
-	App.SetFocus(item)
-	App.ForceDraw()
+	sidebar.FocusField(sidebar.GetCurrentFieldIndex() + 1)
 }
 
 func (sidebar *Sidebar) FocusPreviousField() {
-	newIndex := sidebar.GetCurrentFieldIndex() - 1
-
-	if newIndex < 0 {
-		return
-	}
-
-	item := sidebar.Flex.GetItem(newIndex)
-
-	if item == nil {
-		return
-	}
-
-	sidebar.SetCurrentFieldIndex(newIndex)
-	App.SetFocus(item)
-	App.ForceDraw()
+	sidebar.FocusField(sidebar.GetCurrentFieldIndex() - 1)
 }
 
 func (sidebar *Sidebar) FocusFirstField() {
-	sidebar.SetCurrentFieldIndex(0)
-	App.SetFocus(sidebar.Flex.GetItem(0))
-
-	fieldCount := sidebar.Flex.GetItemCount()
-
-	for i := 0; i < fieldCount; i++ {
-		field := sidebar.Flex.GetItem(i)
-		height := sidebar.FieldParameters[i].Height
-		sidebar.Flex.ResizeItem(field, height, 0)
-	}
+	sidebar.state.firstVisibleField = 0
+	sidebar.FocusField(0)
 }
 
 func (sidebar *Sidebar) FocusLastField() {
-	newIndex := sidebar.Flex.GetItemCount() - 1
-	sidebar.SetCurrentFieldIndex(newIndex)
-	App.SetFocus(sidebar.Flex.GetItem(newIndex))
-
-	_, _, _, ph := sidebar.GetRect()
-
-	hSum := 0
-
-	for i := sidebar.Flex.GetItemCount() - 1; i >= 0; i-- {
-		field := sidebar.Flex.GetItem(i).(*tview.TextArea)
-		_, _, _, h := field.GetRect()
-
-		hSum += h
-
-		if hSum >= ph {
-			sidebar.Flex.ResizeItem(field, 0, 0)
-		}
-	}
+	sidebar.FocusField(sidebar.Flex.GetItemCount() - 1)
 }
 
 func (sidebar *Sidebar) FocusField(index int) {
+	if index < 0 || index >= sidebar.Flex.GetItemCount() {
+		return
+	}
 	sidebar.SetCurrentFieldIndex(index)
 	App.SetFocus(sidebar.Flex.GetItem(index))
 }
 
 func (sidebar *Sidebar) Clear() {
+	sidebar.SetCurrentFieldIndex(0)
+	sidebar.state.firstVisibleField = 0
 	sidebar.FieldParameters = make([]*SidebarFieldParameters, 0)
 	sidebar.Flex.Clear()
 }
@@ -208,6 +214,9 @@ func (sidebar *Sidebar) EditTextCurrentField() {
 }
 
 func (sidebar *Sidebar) inputCapture(event *tcell.EventKey) *tcell.EventKey {
+	if sidebar.Flex.GetItemCount() == 0 {
+		return event
+	}
 	command := app.Keymaps.Group(app.SidebarGroup).Resolve(event)
 
 	switch command {
