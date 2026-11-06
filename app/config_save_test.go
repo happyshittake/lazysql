@@ -11,6 +11,28 @@ import (
 	"github.com/jorgerojas26/lazysql/models"
 )
 
+func TestSaveConnectionsPreservesStartupCommands(t *testing.T) {
+	_, localPath := loadProjectConfig(t, "", "[[database]]\nName = 'one'\nURL = 'sqlite3://one.db'\n[[database.Commands]]\nCommand = 'echo ready'\n")
+	connections := append([]models.Connection(nil), App.Connections()...)
+	connections[0].Name = "renamed"
+	if err := App.SaveConnections(connections); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(localPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var saved struct {
+		Connections []models.Connection `toml:"database"`
+	}
+	if err := toml.Unmarshal(data, &saved); err != nil {
+		t.Fatal(err)
+	}
+	if len(saved.Connections) != 1 || saved.Connections[0].Name != "renamed" || len(saved.Connections[0].Commands) != 1 || saved.Connections[0].Commands[0].Command != "echo ready" {
+		t.Fatalf("startup commands were lost: %+v", saved.Connections)
+	}
+}
+
 const credentialedGlobalConfig = `
 [application]
 DefaultPageSize = 50

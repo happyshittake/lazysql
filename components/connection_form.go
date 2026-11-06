@@ -19,6 +19,7 @@ type ConnectionForm struct {
 	*tview.Form
 	StatusText *tview.TextView
 	Action     string
+	onConnect  func(models.Connection)
 }
 
 func NewConnectionForm(connectionPages *models.ConnectionPages) *ConnectionForm {
@@ -74,106 +75,98 @@ func NewConnectionForm(connectionPages *models.ConnectionPages) *ConnectionForm 
 		StatusText: statusText,
 	}
 
-	wrapper.SetInputCapture(form.inputCapture(connectionPages))
+	saveButton.SetSelectedFunc(func() { form.runAction(tcell.KeyF1, connectionPages) })
+	testButton.SetSelectedFunc(func() { form.runAction(tcell.KeyF2, connectionPages) })
+	connectButton.SetSelectedFunc(func() { form.runAction(tcell.KeyF3, connectionPages) })
+	cancelButton.SetSelectedFunc(func() { form.runAction(tcell.KeyEsc, connectionPages) })
+	wrapper.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		if event.Key() == tcell.KeyEnter && buttonsWrapper.HasFocus() {
+			return event
+		}
+		switch event.Key() {
+		case tcell.KeyEsc, tcell.KeyF1, tcell.KeyEnter, tcell.KeyF2, tcell.KeyF3:
+			form.runAction(event.Key(), connectionPages)
+			return nil
+		}
+		return event
+	})
 
 	return form
 }
 
-func (form *ConnectionForm) inputCapture(connectionPages *models.ConnectionPages) func(event *tcell.EventKey) *tcell.EventKey {
-	return func(event *tcell.EventKey) *tcell.EventKey {
-		if event.Key() == tcell.KeyEsc {
-			connectionPages.SwitchToPage(pageNameConnectionSelection)
-		} else if event.Key() == tcell.KeyF1 || event.Key() == tcell.KeyEnter {
-			connectionName := form.GetFormItem(0).(*tview.InputField).GetText()
-
-			if connectionName == "" {
-				form.StatusText.SetText("Connection name is required").SetTextStyle(tcell.StyleDefault.Foreground(app.Styles.ErrorColor).Background(app.Styles.PrimitiveBackgroundColor))
-				return event
-			}
-
-			connectionString := form.GetFormItem(1).(*tview.InputField).GetText()
-
-			parsed, err := helpers.ParseConnectionString(connectionString)
-			if err != nil {
-				form.StatusText.SetText(err.Error()).SetTextStyle(tcell.StyleDefault.Foreground(app.Styles.ErrorColor).Background(app.Styles.PrimitiveBackgroundColor))
-				return event
-			}
-
-			databases := app.App.Connections()
-			newDatabases := make([]models.Connection, len(databases))
-
-			readOnly := form.GetFormItem(2).(*tview.Checkbox).IsChecked()
-			showAllDatabases := form.GetFormItem(3).(*tview.Checkbox).IsChecked()
-
-			// When the user opts in to browsing every database in the
-			// instance, force DBName empty so the tree's InitializeNodes
-			// falls back to GetDatabases() instead of pinning to whatever
-			// database happens to be embedded in the connection URL.
-			var DBName string
-			if !showAllDatabases {
-				DBName = strings.Split(parsed.Normalize(",", "NULL", 0), ",")[3]
-
-				if DBName == "NULL" {
-					DBName = ""
-				}
-			}
-
-			parsedDatabaseData := models.Connection{
-				Name:     connectionName,
-				Provider: parsed.Driver,
-				DBName:   DBName,
-				URL:      connectionString,
-				ReadOnly: readOnly,
-			}
-
-			switch form.Action {
-			case actionNewConnection:
-
-				newDatabases = append(databases, parsedDatabaseData)
-				err := app.App.SaveConnections(newDatabases)
-				if err != nil {
-					form.StatusText.SetText(err.Error()).SetTextStyle(tcell.StyleDefault.Foreground(app.Styles.ErrorColor).Background(app.Styles.PrimitiveBackgroundColor))
-					return event
-				}
-
-			case actionEditConnection:
-				newDatabases = make([]models.Connection, len(databases))
-				row, _ := connectionsTable.GetSelection()
-
-				for i, database := range databases {
-					if i == row {
-						// Start from the existing connection so fields not
-						// present on the form (Commands, Username, Password,
-						// Hostname, Port, URLParams, Schemas, ...) are preserved.
-						updated := database
-						updated.Name = parsedDatabaseData.Name
-						updated.Provider = parsedDatabaseData.Provider
-						updated.DBName = parsedDatabaseData.DBName
-						updated.URL = parsedDatabaseData.URL
-						updated.ReadOnly = parsedDatabaseData.ReadOnly
-						newDatabases[i] = updated
-					} else {
-						newDatabases[i] = database
-					}
-				}
-
-				err := app.App.SaveConnections(newDatabases)
-				if err != nil {
-					form.StatusText.SetText(err.Error()).SetTextStyle(tcell.StyleDefault.Foreground(app.Styles.ErrorColor).Background(app.Styles.PrimitiveBackgroundColor))
-					return event
-
-				}
-			}
-
-			connectionsTable.SetConnections(newDatabases)
-			connectionPages.SwitchToPage(pageNameConnectionSelection)
-
-		} else if event.Key() == tcell.KeyF2 {
-			connectionString := form.GetFormItem(1).(*tview.InputField).GetText()
-			go form.testConnection(connectionString)
+func (form *ConnectionForm) runAction(key tcell.Key, connectionPages *models.ConnectionPages) {
+	switch key {
+	case tcell.KeyEsc:
+		connectionPages.SwitchToPage(pageNameConnectionSelection)
+	case tcell.KeyF1, tcell.KeyEnter, tcell.KeyF3:
+		connection, err := form.saveConnection()
+		if err != nil {
+			form.StatusText.SetText(err.Error()).SetTextStyle(tcell.StyleDefault.Foreground(app.Styles.ErrorColor).Background(app.Styles.PrimitiveBackgroundColor))
+			return
 		}
-		return event
+		connectionPages.SwitchToPage(pageNameConnectionSelection)
+		if key == tcell.KeyF3 {
+			form.onConnect(connection)
+		}
+	case tcell.KeyF2:
+		connectionString := form.GetFormItem(1).(*tview.InputField).GetText()
+		form.testConnection(connectionString)
 	}
+}
+
+func (form *ConnectionForm) saveConnection() (models.Connection, error) {
+	connectionName := form.GetFormItem(0).(*tview.InputField).GetText()
+	if connectionName == "" {
+		return models.Connection{}, fmt.Errorf("Connection name is required")
+	}
+	connectionString := form.GetFormItem(1).(*tview.InputField).GetText()
+	parsed, err := helpers.ParseConnectionString(connectionString)
+	if err != nil {
+		return models.Connection{}, err
+	}
+
+	databases := app.App.Connections()
+	row := len(databases)
+	connection := models.Connection{}
+	if form.Action == actionEditConnection {
+		row, _ = connectionsTable.GetSelection()
+		if row < 0 || row >= len(databases) {
+			return models.Connection{}, fmt.Errorf("No connection selected")
+		}
+		// Preserve connection fields that are not exposed by the form.
+		connection = databases[row]
+	}
+	for i, database := range databases {
+		if i != row && database.Name == connectionName {
+			return models.Connection{}, fmt.Errorf("Connection %q already exists", connectionName)
+		}
+	}
+
+	var dbName string
+	if !form.GetFormItem(3).(*tview.Checkbox).IsChecked() {
+		dbName = strings.Split(parsed.Normalize(",", "NULL", 0), ",")[3]
+		if dbName == "NULL" {
+			dbName = ""
+		}
+	}
+	connection.Name = connectionName
+	connection.Provider = parsed.Driver
+	connection.DBName = dbName
+	connection.URL = connectionString
+	connection.ReadOnly = form.GetFormItem(2).(*tview.Checkbox).IsChecked()
+
+	newDatabases := append([]models.Connection(nil), databases...)
+	if row == len(databases) {
+		newDatabases = append(newDatabases, connection)
+	} else {
+		newDatabases[row] = connection
+	}
+	if err := app.App.SaveConnections(newDatabases); err != nil {
+		return models.Connection{}, err
+	}
+	connectionsTable.SetConnections(newDatabases)
+	connectionsTable.Select(row, 0)
+	return connection, nil
 }
 
 func (form *ConnectionForm) testConnection(connectionString string) {
@@ -210,15 +203,17 @@ func (form *ConnectionForm) testConnection(connectionString string) {
 		return
 	}
 
-	err = db.TestConnection(app.App.Context(), connectionString)
-
-	if err != nil {
-		usage.ConnectionFailed(telemetry.ConnectionFailure(err))
-		form.StatusText.SetText(err.Error()).SetTextStyle(tcell.StyleDefault.Foreground(app.Styles.ErrorColor).Background(app.Styles.PrimitiveBackgroundColor))
-	} else {
-		form.StatusText.SetText("Connection success").SetTextColor(app.Styles.TertiaryTextColor)
-	}
-	App.ForceDraw()
+	go func() {
+		err := db.TestConnection(app.App.Context(), connectionString)
+		App.QueueUpdateDraw(func() {
+			if err != nil {
+				usage.ConnectionFailed(telemetry.ConnectionFailure(err))
+				form.StatusText.SetText(err.Error()).SetTextStyle(tcell.StyleDefault.Foreground(app.Styles.ErrorColor).Background(app.Styles.PrimitiveBackgroundColor))
+			} else {
+				form.StatusText.SetText("Connection success").SetTextColor(app.Styles.TertiaryTextColor)
+			}
+		})
+	}()
 }
 
 func (form *ConnectionForm) SetAction(action string) {

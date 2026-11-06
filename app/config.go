@@ -454,10 +454,11 @@ func marshalConnectionConfig(connection models.Connection) (map[string]any, erro
 	if err != nil {
 		return nil, err
 	}
-	if err := toml.Unmarshal(encoded, &values); err != nil {
+	var decoded map[string]any
+	if err := toml.Unmarshal(encoded, &decoded); err != nil {
 		return nil, err
 	}
-	return values, nil
+	return decoded, nil
 }
 
 // SaveThemePreset writes the preset to the local config when one is in use,

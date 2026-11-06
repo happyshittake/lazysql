@@ -2,6 +2,7 @@ package components
 
 import (
 	"fmt"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -22,6 +23,7 @@ import (
 type ConnectionSelection struct {
 	*tview.Flex
 	StatusText *tview.TextView
+	connected  map[string]models.Connection
 }
 
 func NewConnectionSelection(connectionForm *ConnectionForm, connectionPages *models.ConnectionPages) *ConnectionSelection {
@@ -76,27 +78,28 @@ func NewConnectionSelection(connectionForm *ConnectionForm, connectionPages *mod
 	cs := &ConnectionSelection{
 		Flex:       wrapper,
 		StatusText: statusText,
+		connected:  make(map[string]models.Connection),
 	}
 
-	wrapper.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+	connectionForm.onConnect = cs.startConnect
+
+	runCommand := func(command commands.Command) bool {
 		connections := connectionsTable.GetConnections()
+		row, _ := connectionsTable.GetSelection()
 
-		command := app.Keymaps.Group(app.ConnectionGroup).Resolve(event)
-
-		if len(connections) != 0 {
-			row, _ := connectionsTable.GetSelection()
+		if row >= 0 && row < len(connections) {
 			selectedConnection := connections[row]
 
 			switch command {
 			case commands.Connect:
-				go cs.Connect(selectedConnection)
+				cs.startConnect(selectedConnection)
 			case commands.EditConnection:
 				connectionPages.SwitchToPage(pageNameConnectionForm)
 				connectionForm.SetConnectionData(selectedConnection)
 				connectionForm.StatusText.SetText("")
 
 				connectionForm.SetAction(actionEditConnection)
-				return nil
+				return true
 			case commands.DeleteConnection:
 				confirmationModal := NewConfirmationModal("")
 
@@ -105,7 +108,8 @@ func NewConnectionSelection(connectionForm *ConnectionForm, connectionPages *mod
 					confirmationModal = nil
 
 					if buttonLabel == "Yes" {
-						newConnections := append(connections[:row], connections[row+1:]...)
+						newConnections := append([]models.Connection(nil), connections[:row]...)
+						newConnections = append(newConnections, connections[row+1:]...)
 
 						err := app.App.SaveConnections(newConnections)
 						if err != nil {
@@ -119,7 +123,7 @@ func NewConnectionSelection(connectionForm *ConnectionForm, connectionPages *mod
 
 				mainPages.AddPage(pageNameConfirmation, confirmationModal, true, true)
 
-				return nil
+				return true
 			}
 		}
 
@@ -135,21 +139,45 @@ func NewConnectionSelection(connectionForm *ConnectionForm, connectionPages *mod
 		case commands.Quit:
 			if wrapper.HasFocus() {
 				showQuitConfirmation()
-				return nil
+				return true
 			}
 		}
 
+		return false
+	}
+
+	newButton.SetSelectedFunc(func() { runCommand(commands.NewConnection) })
+	connectButton.SetSelectedFunc(func() { runCommand(commands.Connect) })
+	editButton.SetSelectedFunc(func() { runCommand(commands.EditConnection) })
+	deleteButton.SetSelectedFunc(func() { runCommand(commands.DeleteConnection) })
+	quitButton.SetSelectedFunc(func() { runCommand(commands.Quit) })
+	wrapper.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		if event.Key() == tcell.KeyEnter && buttonsWrapper.HasFocus() {
+			return event
+		}
+		if runCommand(app.Keymaps.Group(app.ConnectionGroup).Resolve(event)) {
+			return nil
+		}
 		return event
 	})
 
 	return cs
 }
 
-func (cs *ConnectionSelection) Connect(connection models.Connection) *tview.Application {
+func (cs *ConnectionSelection) startConnect(connection models.Connection) {
 	if mainPages.HasPage(connection.Name) {
+		if previous, ok := cs.connected[connection.Name]; ok && !reflect.DeepEqual(previous, connection) {
+			cs.StatusText.SetText("Connection settings changed. Restart LazySQL to reconnect without reusing the old session.").SetTextColor(app.Styles.ErrorColor)
+			return
+		}
 		mainPages.SwitchToPage(connection.Name)
-		return App.Draw()
+		return
 	}
+	go cs.Connect(connection)
+}
+
+func (cs *ConnectionSelection) Connect(connection models.Connection) *tview.Application {
+	configuredConnection := connection
 
 	if len(connection.Commands) > 0 {
 
@@ -271,19 +299,24 @@ func (cs *ConnectionSelection) Connect(connection models.Connection) *tview.Appl
 
 	usage.Connected(newDBDriver.GetProvider(), connection.ReadOnly)
 
-	selectedRow, selectedCol := connectionsTable.GetSelection()
-	cell := connectionsTable.GetCell(selectedRow, selectedCol)
-	cell.SetText(fmt.Sprintf("[%s]* %s", app.Styles.TertiaryTextColor, cell.Text))
-	cs.StatusText.SetText("")
+	return App.QueueUpdateDraw(func() {
+		for row, saved := range connectionsTable.GetConnections() {
+			if saved.Name == configuredConnection.Name {
+				cell := connectionsTable.GetCell(row, 0)
+				cell.SetText(fmt.Sprintf("[%s]* %s", app.Styles.TertiaryTextColor, cell.Text))
+				break
+			}
+		}
+		cs.StatusText.SetText("")
+		cs.connected[configuredConnection.Name] = configuredConnection
 
-	newHome := NewHomePage(connection, newDBDriver)
-	newHome.Tree.SetCurrentNode(newHome.Tree.GetRoot())
-	newHome.Tree.Wrapper.SetTitle(connection.Name)
+		newHome := NewHomePage(connection, newDBDriver)
+		newHome.Tree.SetCurrentNode(newHome.Tree.GetRoot())
+		newHome.Tree.Wrapper.SetTitle(connection.Name)
 
-	mainPages.AddAndSwitchToPage(connection.Name, newHome, true)
-	App.SetFocus(newHome.Tree)
-
-	return App.Draw()
+		mainPages.AddAndSwitchToPage(connection.Name, newHome, true)
+		App.SetFocus(newHome.Tree)
+	})
 }
 
 // Produces two functions: [onCommandDone] should be passed to [helpers.RunCommand],
