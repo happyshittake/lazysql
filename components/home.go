@@ -393,24 +393,15 @@ func canReuseTabForFilter(tab, currentTab *Tab, where string) bool {
 }
 
 func (home *Home) focusRightWrapper() {
-	home.Tree.RemoveHighlight()
-
-	home.RightWrapper.SetBorderColor(app.Styles.PrimaryTextColor)
-	home.LeftWrapper.SetBorderColor(app.Styles.InverseTextColor)
-	home.TabbedPane.Highlight()
-	tab := home.TabbedPane.GetCurrentTab()
-
-	if tab != nil {
+	home.highlightWrapper(focusedWrapperRight)
+	if tab := home.TabbedPane.GetCurrentTab(); tab != nil {
 		home.focusTab(tab)
 	}
-
-	home.FocusedWrapper = focusedWrapperRight
 }
 
 func (home *Home) focusTab(tab *Tab) {
 	if tab != nil {
 		table := tab.Content.(*ResultsTable)
-		table.HighlightAll()
 
 		if table.GetIsFiltering() {
 			go func() {
@@ -439,25 +430,65 @@ func (home *Home) focusTab(tab *Tab) {
 }
 
 func (home *Home) focusLeftWrapper() {
-	home.Tree.Highlight()
-
-	home.RightWrapper.SetBorderColor(app.Styles.InverseTextColor)
-	home.LeftWrapper.SetBorderColor(app.Styles.PrimaryTextColor)
-
-	tab := home.TabbedPane.GetCurrentTab()
-
-	if tab != nil {
-		table := tab.Content.(*ResultsTable)
-
-		table.RemoveHighlightAll()
-
-	}
-
-	home.TabbedPane.SetBlur()
-
+	home.highlightWrapper(focusedWrapperLeft)
 	app.App.SetFocus(home.Tree)
+}
 
-	home.FocusedWrapper = focusedWrapperLeft
+// Keep pane styling separate from focus so mouse clicks can target child widgets.
+func (home *Home) highlightWrapper(wrapper string) {
+	tab := home.TabbedPane.GetCurrentTab()
+	if wrapper == focusedWrapperRight {
+		home.Tree.RemoveHighlight()
+		home.RightWrapper.SetBorderColor(app.Styles.PrimaryTextColor)
+		home.LeftWrapper.SetBorderColor(app.Styles.InverseTextColor)
+		home.TabbedPane.Highlight()
+		if tab != nil {
+			tab.Content.(*ResultsTable).HighlightAll()
+		}
+	} else {
+		home.Tree.Highlight()
+		home.RightWrapper.SetBorderColor(app.Styles.InverseTextColor)
+		home.LeftWrapper.SetBorderColor(app.Styles.PrimaryTextColor)
+		home.TabbedPane.SetBlur()
+		if tab != nil {
+			tab.Content.(*ResultsTable).RemoveHighlightAll()
+		}
+	}
+	home.FocusedWrapper = wrapper
+}
+
+func (home *Home) MouseHandler() func(tview.MouseAction, *tcell.EventMouse, func(tview.Primitive)) (bool, tview.Primitive) {
+	return func(action tview.MouseAction, event *tcell.EventMouse, setFocus func(tview.Primitive)) (bool, tview.Primitive) {
+		if mainPages != nil {
+			if _, front := mainPages.GetFrontPage(); front != nil && front != home {
+				return false, nil
+			}
+		}
+		consumed, capture := home.Flex.MouseHandler()(action, event, setFocus)
+		if action != tview.MouseLeftDown && action != tview.MouseLeftClick {
+			return consumed, capture
+		}
+		var wrapper string
+		var fallback tview.Primitive
+		if home.leftWrapperVisible && home.LeftWrapper.InRect(event.Position()) {
+			wrapper, fallback = focusedWrapperLeft, home.Tree
+		} else if home.RightWrapper.InRect(event.Position()) {
+			wrapper = focusedWrapperRight
+			if tab := home.TabbedPane.GetCurrentTab(); tab != nil {
+				fallback = tab.Content.(*ResultsTable)
+			}
+		} else {
+			return consumed, capture
+		}
+		if home.FocusedWrapper != wrapper {
+			home.highlightWrapper(wrapper)
+		}
+		if !consumed && action == tview.MouseLeftDown && fallback != nil {
+			setFocus(fallback)
+			consumed = true
+		}
+		return consumed, capture
+	}
 }
 
 func (home *Home) isCurrentTabFiltering() bool {

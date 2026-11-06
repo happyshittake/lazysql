@@ -269,6 +269,13 @@ func (table *ResultsTable) WithFilter() *ResultsTable {
 	filter := NewResultsFilter()
 
 	table.Menu = menu
+	menu.onSelected = func(option int) {
+		if table.GetIsEditing() {
+			return
+		}
+		table.selectMenuOption(option)
+		App.SetFocus(table)
+	}
 	table.Filter = filter
 	table.configureFilterAutocomplete()
 	filter.Input.SetMouseCapture(func(action tview.MouseAction, event *tcell.EventMouse) (tview.MouseAction, *tcell.EventMouse) {
@@ -668,6 +675,26 @@ func (table *ResultsTable) AppendNewRow(cells []models.CellValue, index int, UUI
 	App.ForceDraw()
 }
 
+func (table *ResultsTable) selectMenuOption(option int) {
+	table.Select(1, 0)
+	table.Menu.SetSelectedOption(option)
+	switch option {
+	case 1:
+		table.UpdateRows(table.GetRecords())
+		table.colorChangedCells()
+		table.AddInsertedRows()
+		table.UpdateRowsColor(app.Styles.PrimaryTextColor, tview.Styles.PrimaryTextColor)
+	case 2:
+		table.showMetadataSurface(MetadataColumns)
+	case 3:
+		table.showMetadataSurface(MetadataConstraints)
+	case 4:
+		table.showMetadataSurface(MetadataForeignKeys)
+	case 5:
+		table.showMetadataSurface(MetadataIndexes)
+	}
+}
+
 func (table *ResultsTable) tableInputCapture(event *tcell.EventKey) *tcell.EventKey {
 	if event.Key() == tcell.KeyEscape && table.state.rangeAnchor != 0 {
 		table.cancelRowRange()
@@ -702,23 +729,15 @@ func (table *ResultsTable) tableInputCapture(event *tcell.EventKey) *tcell.Event
 	if table.Menu != nil {
 		switch command {
 		case commands.RecordsMenu:
-			table.Menu.SetSelectedOption(1)
-			table.UpdateRows(table.GetRecords())
-			table.colorChangedCells()
-			table.AddInsertedRows()
-			table.UpdateRowsColor(app.Styles.PrimaryTextColor, tview.Styles.PrimaryTextColor)
+			table.selectMenuOption(1)
 		case commands.ColumnsMenu:
-			table.Menu.SetSelectedOption(2)
-			table.showMetadataSurface(MetadataColumns)
+			table.selectMenuOption(2)
 		case commands.ConstraintsMenu:
-			table.Menu.SetSelectedOption(3)
-			table.showMetadataSurface(MetadataConstraints)
+			table.selectMenuOption(3)
 		case commands.ForeignKeysMenu:
-			table.Menu.SetSelectedOption(4)
-			table.showMetadataSurface(MetadataForeignKeys)
+			table.selectMenuOption(4)
 		case commands.IndexesMenu:
-			table.Menu.SetSelectedOption(5)
-			table.showMetadataSurface(MetadataIndexes)
+			table.selectMenuOption(5)
 		case commands.Refresh:
 			table.RefreshActiveSurface()
 		}

@@ -3,6 +3,7 @@ package components
 import (
 	"fmt"
 
+	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 
 	"github.com/jorgerojas26/lazysql/app"
@@ -14,8 +15,9 @@ type ResultsTableMenuState struct {
 
 type ResultsTableMenu struct {
 	*tview.Flex
-	state     *ResultsTableMenuState
-	MenuItems []*tview.TextView
+	state      *ResultsTableMenuState
+	MenuItems  []*tview.TextView
+	onSelected func(int)
 }
 
 var menuItems = []string{
@@ -67,6 +69,30 @@ func NewResultsTableMenu() *ResultsTableMenu {
 	}
 
 	return menu
+}
+
+func (menu *ResultsTableMenu) MouseHandler() func(tview.MouseAction, *tcell.EventMouse, func(tview.Primitive)) (bool, tview.Primitive) {
+	return menu.WrapMouseHandler(func(action tview.MouseAction, event *tcell.EventMouse, setFocus func(tview.Primitive)) (bool, tview.Primitive) {
+		x, y := event.Position()
+		innerX, innerY, width, height := menu.GetInnerRect()
+		if x < innerX || x >= innerX+width || y < innerY || y >= innerY+height {
+			return false, nil
+		}
+		if action != tview.MouseLeftDown && action != tview.MouseLeftClick {
+			return false, nil
+		}
+		for i, item := range menu.MenuItems {
+			itemX, _, _, _ := item.GetRect()
+			labelWidth := tview.TaggedStringWidth(fmt.Sprintf("%s [%d]", menuItems[i], i+1))
+			if item.InRect(x, y) && x < itemX+labelWidth {
+				if action == tview.MouseLeftClick && menu.onSelected != nil {
+					menu.onSelected(i + 1)
+				}
+				return true, nil
+			}
+		}
+		return false, nil
+	})
 }
 
 // Getters and Setters

@@ -56,7 +56,7 @@ func InitFromArg(connectionString string, readOnly bool) error {
 	}
 	initialTelemetryEngine = newDBDriver.GetProvider()
 	initialTelemetryReadOnly = connection.ReadOnly
-	mainPages.AddAndSwitchToPage(connection.URL, NewHomePage(connection, newDBDriver).Flex, true)
+	mainPages.AddAndSwitchToPage(connection.URL, NewHomePage(connection, newDBDriver), true)
 
 	return nil
 }

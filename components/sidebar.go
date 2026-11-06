@@ -169,6 +169,8 @@ func (sidebar *Sidebar) MouseHandler() func(tview.MouseAction, *tcell.EventMouse
 					return true, nil
 				}
 			}
+			setFocus(sidebar)
+			return true, nil
 		}
 		return false, nil
 	})
