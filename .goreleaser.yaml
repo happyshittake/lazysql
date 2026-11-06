@@ -55,12 +55,3 @@ changelog:
     exclude:
       - "^docs:"
       - "^test:"
-brews:
-  - 
-    name: lazysql
-    homepage: https://github.com/jorgerojas26/lazysql
-    repository:
-      owner: jorgerojas26
-      name: homebrew-lazysql
-    test: |
-      system "#{bin}/lazysql version"

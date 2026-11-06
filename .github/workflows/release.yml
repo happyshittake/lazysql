@@ -31,7 +31,7 @@ jobs:
           version: '~> v2'
           args: release --clean
         env:
-          GITHUB_TOKEN: ${{ secrets.GH_PAT }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Public collector URL; unset keeps telemetry entirely disabled.
           TELEMETRY_ENDPOINT: ${{ vars.TELEMETRY_ENDPOINT }}
           # Your GoReleaser Pro key, if you are using the 'goreleaser-pro' distribution
