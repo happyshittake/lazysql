@@ -270,6 +270,13 @@ func (table *ResultsTable) WithFilter() *ResultsTable {
 
 	table.Menu = menu
 	table.Filter = filter
+	table.configureFilterAutocomplete()
+	filter.Input.SetMouseCapture(func(action tview.MouseAction, event *tcell.EventMouse) (tview.MouseAction, *tcell.EventMouse) {
+		if action == tview.MouseLeftDown && !filter.Input.HasFocus() && filter.Input.InRect(event.Position()) {
+			filter.Input.Autocomplete()
+		}
+		return action, event
+	})
 
 	if App.Config().SidebarOverlay {
 		table.Wrapper.AddItem(menu, 3, 0, false)
@@ -2730,6 +2737,11 @@ func (table *ResultsTable) search() {
 		go table.Filter.Input.SetText("")
 	}
 
+	table.Filter.Input.Autocomplete()
+	table.SetInputCapture(nil)
+}
+
+func (table *ResultsTable) configureFilterAutocomplete() {
 	table.Filter.Input.SetAutocompleteFunc(func(currentText string) []string {
 		split := strings.Split(currentText, " ")
 		comparators := []string{
@@ -2812,8 +2824,6 @@ func (table *ResultsTable) search() {
 		}
 		return source == tview.AutocompletedEnter || source == tview.AutocompletedClick
 	})
-
-	table.SetInputCapture(nil)
 }
 
 func (table *ResultsTable) FinishSettingValue() {
