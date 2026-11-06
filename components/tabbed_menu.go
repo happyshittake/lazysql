@@ -61,6 +61,10 @@ func NewTabbedPane() *TabbedPane {
 	}
 
 	container.SetDrawFunc(func(screen tcell.Screen, x, y, width, height int) (int, int, int, int) {
+		// Grid skips hidden items without clearing their previous mouse hit targets.
+		for tab := tabbedPane.state.FirstTab; tab != nil; tab = tab.NextTab {
+			tab.Header.SetRect(0, 0, 0, 0)
+		}
 		innerWidth := width - 2
 
 		leftReserve, rightReserve := 0, 0
@@ -122,6 +126,24 @@ func (t *TabbedPane) AppendTab(name string, content TabContent, reference string
 		Header:    item,
 		Reference: reference,
 	}
+
+	textView.SetMouseCapture(func(action tview.MouseAction, event *tcell.EventMouse) (tview.MouseAction, *tcell.EventMouse) {
+		if !item.InRect(event.Position()) || (action != tview.MouseLeftDown && action != tview.MouseLeftClick) {
+			return action, event
+		}
+		if action == tview.MouseLeftClick {
+			if current := t.GetCurrentTab(); current != nil {
+				if table, ok := current.Content.(*ResultsTable); ok && table.Editor == nil && table.GetIsEditing() {
+					return tview.MouseConsumed, nil
+				}
+			}
+			t.SetCurrentTab(newTab)
+			if table, ok := newTab.Content.(*ResultsTable); ok && table.Home != nil {
+				table.Home.highlightWrapper(focusedWrapperRight)
+			}
+		}
+		return tview.MouseConsumed, nil
+	})
 
 	t.state.Length++
 
